@@ -1,0 +1,159 @@
+
+CREATE TABLE IF NOT EXISTS raw_sales (
+    event_id          VARCHAR(255),
+    order_id          VARCHAR(255),
+    event_type        VARCHAR(255),
+    event_time_utc    TIMESTAMP,
+    producer_time_utc TIMESTAMP,
+    customer_id       VARCHAR(255),
+    product_id        VARCHAR(255),
+    category          VARCHAR(255),
+    quantity          INT,
+    unit_price_vnd    DECIMAL(18, 2),
+    order_total_vnd   DECIMAL(18, 2),
+    payment_method    VARCHAR(255),
+    city              VARCHAR(255),
+    device            VARCHAR(255),
+    traffic_source    VARCHAR(255),
+    promo_code        VARCHAR(255),
+    is_late_event     BOOLEAN
+);
+CREATE SCHEMA IF NOT EXISTS silver;
+CREATE SCHEMA IF NOT EXISTS gold;
+
+-- =====================================================
+-- SILVER: mỗi dòng là một sự kiện, không trùng event_id
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS silver.sales_events (
+    event_id          TEXT PRIMARY KEY,
+    order_id          TEXT NOT NULL,
+    event_type        TEXT NOT NULL,
+    event_time_utc    TIMESTAMPTZ NOT NULL,
+    producer_time_utc TIMESTAMPTZ,
+    customer_id       TEXT,
+    product_id        TEXT,
+    category          TEXT,
+    quantity          INT,
+    unit_price_vnd    NUMERIC(18, 2),
+    order_total_vnd   NUMERIC(18, 2),
+    payment_method    TEXT,
+    city              TEXT,
+    device            TEXT,
+    traffic_source    TEXT,
+    promo_code        TEXT,
+    is_late_event     BOOLEAN,
+    loaded_at         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sales_events_order
+    ON silver.sales_events (order_id);
+
+CREATE INDEX IF NOT EXISTS idx_sales_events_time
+    ON silver.sales_events (event_time_utc);
+
+-- =====================================================
+-- GOLD: DIMENSION
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS gold.dim_date (
+    date_key       INT PRIMARY KEY,  -- Quy ước YYYYMMDD
+    full_date      DATE NOT NULL UNIQUE,
+    date_label     VARCHAR(8) NOT NULL, -- Hiển thị YYYYDDMM bạn muốn
+    day_of_month   SMALLINT NOT NULL,
+    month_number   SMALLINT NOT NULL,
+    quarter_number SMALLINT NOT NULL,
+    year_number    SMALLINT NOT NULL,
+    day_of_week    SMALLINT NOT NULL, -- ISO: thứ Hai = 1, Chủ nhật = 7
+    is_weekend     BOOLEAN NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS gold.dim_customer (
+    customer_key BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    customer_id  TEXT NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS gold.dim_product (
+    product_key BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    product_id  TEXT NOT NULL UNIQUE,
+    category    TEXT
+);
+
+-- =====================================================
+-- GOLD: mỗi dòng là một sự kiện
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS gold.fact_sales_events (
+    event_id          TEXT PRIMARY KEY,
+    order_id          TEXT NOT NULL,
+    event_type        TEXT NOT NULL,
+
+    event_date_key    INT NOT NULL REFERENCES gold.dim_date (date_key),
+    producer_date_key INT REFERENCES gold.dim_date (date_key),
+    customer_key      BIGINT REFERENCES gold.dim_customer (customer_key),
+    product_key       BIGINT REFERENCES gold.dim_product (product_key),
+
+    event_time_utc    TIMESTAMPTZ NOT NULL,
+    producer_time_utc TIMESTAMPTZ,
+    quantity          INT,
+    unit_price_vnd    NUMERIC(18, 2),
+    order_total_vnd   NUMERIC(18, 2),
+
+    payment_method    TEXT,
+    city              TEXT,
+    device            TEXT,
+    traffic_source    TEXT,
+    promo_code        TEXT,
+    is_late_event     BOOLEAN
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_sales_events_order
+    ON gold.fact_sales_events (order_id);
+
+CREATE INDEX IF NOT EXISTS idx_fact_sales_events_date
+    ON gold.fact_sales_events (event_date_key);
+
+-- =====================================================
+-- GOLD: mỗi dòng là một đơn hàng
+-- Tổng hợp từ nhiều sự kiện của cùng order_id
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS gold.fact_orders (
+    order_id           TEXT PRIMARY KEY,
+    customer_key       BIGINT REFERENCES gold.dim_customer (customer_key),
+
+    created_date_key   INT REFERENCES gold.dim_date (date_key),
+    paid_date_key      INT REFERENCES gold.dim_date (date_key),
+    delivered_date_key INT REFERENCES gold.dim_date (date_key),
+
+    created_at_utc     TIMESTAMPTZ,
+    paid_at_utc        TIMESTAMPTZ,
+    shipped_at_utc     TIMESTAMPTZ,
+    delivered_at_utc   TIMESTAMPTZ,
+
+    latest_event_type  TEXT NOT NULL,
+    latest_event_at_utc TIMESTAMPTZ NOT NULL,
+    order_total_vnd    NUMERIC(18, 2),
+
+    payment_method     TEXT,
+    city               TEXT,
+    device             TEXT,
+    traffic_source     TEXT,
+    promo_code         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_fact_orders_created_date
+    ON gold.fact_orders (created_date_key);
+
+CREATE INDEX IF NOT EXISTS idx_fact_orders_paid_date
+    ON gold.fact_orders (paid_date_key);
+ALTER TABLE gold.dim_product
+DROP CONSTRAINT IF EXISTS dim_product_product_id_key;
+
+ALTER TABLE gold.dim_product
+ALTER COLUMN category SET NOT NULL;
+
+ALTER TABLE gold.dim_product
+ADD CONSTRAINT uq_dim_product_product_category
+UNIQUE (product_id, category);
+

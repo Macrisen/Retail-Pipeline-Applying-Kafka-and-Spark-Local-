@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+
+# Local runtimes, checkpoints, logs, downloaded binaries and test artifacts
+.local/
+
+# Large generated/source data kept locally
+raw_sales.csv
+dashboard/*.csv
