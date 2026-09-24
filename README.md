@@ -1,7 +1,7 @@
 # SQL của Retail Medallion Pipeline
 
 ## Dashboard 
-[![Xem báo cáo PDF](./dataengineerdasboard(1).pdf)
+[![Xem báo cáo PDF](./dataengineerdashboard.pdf)
 ## Chọn một trong hai nguồn Bronze
 
 **Luồng chính hiện tại: Kafka → PostgreSQL local.** Trên database local mới,
